@@ -1,0 +1,21 @@
+{
+  "name": "liveness-guard",
+  "version": "1.0.0",
+  "description": "EIP-7702 based dead-man switch smart account",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "clean": "hardhat clean",
+    "deploy:factory": "hardhat run scripts/deploy-create2-factory.ts",
+    "deploy": "hardhat run scripts/deploy.ts"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "hardhat": "^2.19.4",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.1",
+    "@safe-global/safe-singleton-factory": "^2.0.0"
+  }
+}
