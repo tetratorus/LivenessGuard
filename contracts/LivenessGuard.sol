@@ -5,35 +5,61 @@ pragma solidity ^0.8.24;
 /// @notice Minimal EIP-7702 dead-man switch. Silence is not consent.
 /// @dev Guardian can initiate recovery, user can veto by calling cancelRecovery.
 ///      Time alone should never cause asset movement - recovery requires human action.
+///      Uses delegate-then-activate model: 7702 delegation is inert until user activates.
 contract LivenessGuard {
     // Immutables (set at deployment)
     address public immutable guardian;
     uint256 public immutable recoveryDelay;
 
-    // Storage: 1 slot per EOA
-    // 0 = normal, >0 = recovery pending (timestamp when initiated)
-    uint256 public recoveryInitiatedAt;
+    // Storage per EOA
+    uint256 public activatedAt;        // 0 = inert, >0 = timestamp when activated
+    uint256 public recoveryInitiatedAt; // 0 = normal, >0 = recovery pending
 
-    // Authorized executors (can call execute after recovery)
-    mapping(address => bool) public isExecutor;
+    // Authorized operators (can call execute after recovery)
+    mapping(address => bool) public isOperator;
 
+    event Activated(uint256 timestamp);
     event RecoveryInitiated(uint256 timestamp);
     event RecoveryCancelled();
     event Executed(address indexed to, uint256 value, bytes data);
-    event ExecutorAdded(address indexed executor);
-    event ExecutorRemoved(address indexed executor);
+    event OperatorAdded(address indexed operator);
+    event OperatorRemoved(address indexed operator);
 
     error NotGuardian();
     error NotAuthorized();
     error NotSelf();
+    error NotActivated();
+    error AlreadyActivated();
+    error ActivationExpired();
+    error InvalidSignature();
     error RecoveryNotInitiated();
     error RecoveryAlreadyInitiated();
     error RecoveryDelayNotPassed();
     error ExecutionFailed();
 
+    bytes32 constant ACTIVATE_TYPEHASH = keccak256("Activate(address account,uint256 chainId,uint256 expiry)");
+
     constructor(address _guardian, uint256 _recoveryDelay) {
         guardian = _guardian;
         recoveryDelay = _recoveryDelay;
+    }
+
+    /// @notice Activate the guard with user signature (can be relayed by anyone)
+    /// @dev Protects against 0-chainID 7702 attack - activation must happen within expiry
+    /// @param expiry Timestamp after which activation is no longer valid
+    /// @param sig User signature of keccak256(ACTIVATE_TYPEHASH, account, chainId, expiry)
+    function activate(uint256 expiry, bytes calldata sig) external {
+        if (activatedAt != 0) revert AlreadyActivated();
+        if (block.timestamp > expiry) revert ActivationExpired();
+
+        bytes32 hash = keccak256(abi.encodePacked(
+            "\x19Ethereum Signed Message:\n32",
+            keccak256(abi.encode(ACTIVATE_TYPEHASH, address(this), block.chainid, expiry))
+        ));
+        if (_recover(hash, sig) != address(this)) revert InvalidSignature();
+
+        activatedAt = block.timestamp;
+        emit Activated(block.timestamp);
     }
 
     /// @notice User cancels recovery by calling on their own EOA
@@ -49,18 +75,19 @@ contract LivenessGuard {
     /// @notice Guardian initiates recovery process
     function initiateRecovery() external {
         if (msg.sender != guardian) revert NotGuardian();
+        if (activatedAt == 0) revert NotActivated();
         if (recoveryInitiatedAt != 0) revert RecoveryAlreadyInitiated();
 
         recoveryInitiatedAt = block.timestamp;
         emit RecoveryInitiated(block.timestamp);
     }
 
-    /// @notice Guardian or authorized executor executes after recovery delay has passed
+    /// @notice Guardian or authorized operator executes after recovery delay has passed
     /// @param to Target address
     /// @param value ETH value to send
     /// @param data Calldata to execute
     function execute(address to, uint256 value, bytes calldata data) external returns (bytes memory) {
-        if (msg.sender != guardian && !isExecutor[msg.sender]) revert NotAuthorized();
+        if (msg.sender != guardian && !isOperator[msg.sender]) revert NotAuthorized();
         if (recoveryInitiatedAt == 0) revert RecoveryNotInitiated();
         if (block.timestamp < recoveryInitiatedAt + recoveryDelay) revert RecoveryDelayNotPassed();
 
@@ -71,26 +98,38 @@ contract LivenessGuard {
         return result;
     }
 
-    /// @notice Guardian adds an authorized executor (only after recovery delay)
-    /// @param executor Address to authorize
-    function addExecutor(address executor) external {
+    /// @notice Guardian adds an authorized operator (only after recovery delay)
+    /// @param operator Address to authorize
+    function addOperator(address operator) external {
         if (msg.sender != guardian) revert NotGuardian();
         if (recoveryInitiatedAt == 0) revert RecoveryNotInitiated();
         if (block.timestamp < recoveryInitiatedAt + recoveryDelay) revert RecoveryDelayNotPassed();
 
-        isExecutor[executor] = true;
-        emit ExecutorAdded(executor);
+        isOperator[operator] = true;
+        emit OperatorAdded(operator);
     }
 
-    /// @notice Guardian removes an authorized executor
-    /// @param executor Address to remove
-    function removeExecutor(address executor) external {
+    /// @notice Guardian removes an authorized operator
+    /// @param operator Address to remove
+    function removeOperator(address operator) external {
         if (msg.sender != guardian) revert NotGuardian();
 
-        isExecutor[executor] = false;
-        emit ExecutorRemoved(executor);
+        isOperator[operator] = false;
+        emit OperatorRemoved(operator);
     }
 
     /// @notice Accept ETH transfers
     receive() external payable {}
+
+    function _recover(bytes32 hash, bytes calldata sig) internal pure returns (address) {
+        if (sig.length != 65) return address(0);
+        bytes32 r; bytes32 s; uint8 v;
+        assembly {
+            r := calldataload(sig.offset)
+            s := calldataload(add(sig.offset, 32))
+            v := byte(0, calldataload(add(sig.offset, 64)))
+        }
+        if (v < 27) v += 27;
+        return ecrecover(hash, v, r, s);
+    }
 }

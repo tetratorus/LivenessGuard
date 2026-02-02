@@ -5,10 +5,12 @@ Minimal EIP-7702 dead-man switch for EOA recovery.
 ## How It Works
 
 1. User delegates their EOA to LivenessGuard via EIP-7702
-2. Guardian (fixed at deployment) can initiate recovery
-3. Long delay period (e.g., 30 days)
-4. User can veto anytime by calling `cancelRecovery()` - proves key possession
-5. After delay, guardian can `execute()` to move assets
+2. User signs activation message with expiry (relayable by anyone)
+3. Guardian (fixed at deployment) can initiate recovery
+4. Long delay period (e.g., 30 days)
+5. User can veto anytime by calling `cancelRecovery()` - proves key possession
+6. After delay, guardian can `execute()` to move assets
+7. Guardian can add operators to delegate execution rights
 
 ## Contract
 
@@ -17,13 +19,18 @@ Minimal EIP-7702 dead-man switch for EOA recovery.
 address immutable guardian;
 uint256 immutable recoveryDelay;
 
-// Storage: 1 slot per EOA
+// Storage per EOA
+uint256 activatedAt;          // 0 = inert, >0 = active
 uint256 recoveryInitiatedAt;  // 0 = normal, >0 = recovery pending
+mapping(address => bool) isOperator;
 
 // Functions
+activate(expiry, sig)         // Anyone can relay user's signed activation
 cancelRecovery()              // User only (msg.sender == address(this))
-initiateRecovery()            // Guardian only
-execute(to, value, data)      // Guardian only, after delay
+initiateRecovery()            // Guardian only, requires activated
+execute(to, value, data)      // Guardian or operator, after delay
+addOperator(operator)         // Guardian only, after delay
+removeOperator(operator)      // Guardian only
 ```
 
 ## Usage
