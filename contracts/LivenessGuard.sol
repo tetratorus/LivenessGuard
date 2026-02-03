@@ -2,11 +2,11 @@
 pragma solidity ^0.8.24;
 
 /// @title LivenessGuard
-/// @notice Minimal EIP-7702 dead-man switch with SCA passthrough.
+/// @notice Minimal EIP-7702 dead-man switch with SCW passthrough.
 /// @dev Guardian can initiate recovery, user can veto by calling cancelRecovery.
 ///      Time alone should never cause asset movement - recovery requires human action.
 ///      Uses delegate-then-activate model: 7702 delegation is inert until user activates.
-///      Supports passthrough to underlying SCA (Safe, ERC-4337, etc.) via fallback.
+///      Supports passthrough to underlying SCW (Safe, ERC-4337, etc.) via fallback.
 contract LivenessGuard {
     // Immutables (set at deployment)
     address public immutable guardian;
@@ -15,7 +15,7 @@ contract LivenessGuard {
     // Storage per EOA
     uint256 public activatedAt;         // 0 = inert, >0 = timestamp when activated
     uint256 public recoveryInitiatedAt; // 0 = normal, >0 = recovery pending
-    address public implementation;      // Underlying SCA (Safe, etc.) for passthrough
+    address public implementation;      // Underlying SCW (Safe, etc.) for passthrough
 
     // Authorized operators (can call execute after recovery)
     mapping(address => bool) public isOperator;
@@ -47,9 +47,9 @@ contract LivenessGuard {
         recoveryDelay = _recoveryDelay;
     }
 
-    /// @notice Set the underlying SCA implementation for passthrough
+    /// @notice Set the underlying SCW implementation for passthrough
     /// @dev Only callable by the EOA owner (msg.sender == address(this))
-    /// @param impl Address of the SCA implementation (Safe, ERC-4337, etc.)
+    /// @param impl Address of the SCW implementation (Safe, ERC-4337, etc.)
     function setImplementation(address impl) external {
         if (msg.sender != address(this)) revert NotSelf();
         implementation = impl;
@@ -134,7 +134,7 @@ contract LivenessGuard {
     /// @notice Accept ETH transfers
     receive() external payable {}
 
-    /// @notice Passthrough to underlying SCA implementation
+    /// @notice Passthrough to underlying SCW implementation
     /// @dev Delegatecalls to implementation for any function not defined on LivenessGuard
     fallback() external payable {
         address impl = implementation;

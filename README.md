@@ -12,7 +12,7 @@ Minimal EIP-7702 dead-man switch for EOA recovery.
 6. After delay, guardian can `execute()` to move assets
 7. Guardian can add operators to delegate execution rights
 
-## SCA Passthrough
+## SCW Passthrough
 
 LivenessGuard supports passthrough to an underlying Smart Contract Account (Safe, ERC-4337, etc.):
 
@@ -35,7 +35,7 @@ uint256 immutable recoveryDelay;
 // Storage per EOA
 uint256 activatedAt;          // 0 = inert, >0 = active
 uint256 recoveryInitiatedAt;  // 0 = normal, >0 = recovery pending
-address implementation;       // Underlying SCA for passthrough
+address implementation;       // Underlying SCW for passthrough
 mapping(address => bool) isOperator;
 
 // Functions
@@ -45,7 +45,7 @@ initiateRecovery()            // Guardian only, requires activated
 execute(to, value, data)      // Guardian or operator, after delay
 addOperator(operator)         // Guardian only, after delay
 removeOperator(operator)      // Guardian only
-setImplementation(impl)       // User only, sets SCA passthrough
+setImplementation(impl)       // User only, sets SCW passthrough
 ```
 
 ## Usage

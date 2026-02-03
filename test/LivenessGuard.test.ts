@@ -364,24 +364,24 @@ describe("LivenessGuard", function () {
       const user = await createUser();
       const delegated = await setupDelegation(user);
 
-      const MockSCA = await ethers.getContractFactory("MockSCA");
-      const mockSCA = await MockSCA.deploy();
+      const MockSCW = await ethers.getContractFactory("MockSCW");
+      const mockSCW = await MockSCW.deploy();
 
-      await expect(delegated.connect(user).setImplementation(await mockSCA.getAddress()))
+      await expect(delegated.connect(user).setImplementation(await mockSCW.getAddress()))
         .to.emit(delegated, "ImplementationSet")
-        .withArgs(await mockSCA.getAddress());
+        .withArgs(await mockSCW.getAddress());
 
-      expect(await delegated.implementation()).to.equal(await mockSCA.getAddress());
+      expect(await delegated.implementation()).to.equal(await mockSCW.getAddress());
     });
 
     it("non-user cannot set implementation", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
 
-      const MockSCA = await ethers.getContractFactory("MockSCA");
-      const mockSCA = await MockSCA.deploy();
+      const MockSCW = await ethers.getContractFactory("MockSCW");
+      const mockSCW = await MockSCW.deploy();
 
-      await expect(delegated.connect(other).setImplementation(await mockSCA.getAddress()))
+      await expect(delegated.connect(other).setImplementation(await mockSCW.getAddress()))
         .to.be.revertedWithCustomError(delegated, "NotSelf");
     });
 
@@ -389,23 +389,23 @@ describe("LivenessGuard", function () {
       const user = await createUser();
       const delegated = await setupDelegation(user);
 
-      const MockSCA = await ethers.getContractFactory("MockSCA");
-      const mockSCA = await MockSCA.deploy();
+      const MockSCW = await ethers.getContractFactory("MockSCW");
+      const mockSCW = await MockSCW.deploy();
 
       // User sets implementation
-      await delegated.connect(user).setImplementation(await mockSCA.getAddress());
+      await delegated.connect(user).setImplementation(await mockSCW.getAddress());
 
-      // Call SCA function through the delegated contract
-      const scaInterface = MockSCA.interface;
-      const calldata = scaInterface.encodeFunctionData("setSCAValue", [42n]);
+      // Call SCW function through the delegated contract
+      const scwInterface = MockSCW.interface;
+      const calldata = scwInterface.encodeFunctionData("setSCWValue", [42n]);
 
       // Anyone can call the passthrough
       await deployer.sendTransaction({ to: user.address, data: calldata });
 
       // Value is stored in user's EOA storage (via delegatecall)
-      const getCalldata = scaInterface.encodeFunctionData("getSCAValue");
+      const getCalldata = scwInterface.encodeFunctionData("getSCWValue");
       const result = await ethers.provider.call({ to: user.address, data: getCalldata });
-      const decoded = scaInterface.decodeFunctionResult("getSCAValue", result);
+      const decoded = scwInterface.decodeFunctionResult("getSCWValue", result);
       expect(decoded[0]).to.equal(42n);
     });
 
@@ -414,8 +414,8 @@ describe("LivenessGuard", function () {
       const delegated = await setupDelegation(user);
 
       // No implementation set, call should just return
-      const MockSCA = await ethers.getContractFactory("MockSCA");
-      const calldata = MockSCA.interface.encodeFunctionData("setSCAValue", [42n]);
+      const MockSCW = await ethers.getContractFactory("MockSCW");
+      const calldata = MockSCW.interface.encodeFunctionData("setSCWValue", [42n]);
 
       // Should not revert
       await deployer.sendTransaction({ to: user.address, data: calldata });
@@ -426,9 +426,9 @@ describe("LivenessGuard", function () {
       const delegated = await setupDelegation(user);
       await activateGuard(delegated, user);
 
-      const MockSCA = await ethers.getContractFactory("MockSCA");
-      const mockSCA = await MockSCA.deploy();
-      await delegated.connect(user).setImplementation(await mockSCA.getAddress());
+      const MockSCW = await ethers.getContractFactory("MockSCW");
+      const mockSCW = await MockSCW.deploy();
+      await delegated.connect(user).setImplementation(await mockSCW.getAddress());
 
       // initiateRecovery should still work (not passthrough)
       await expect(delegated.connect(guardian).initiateRecovery())
