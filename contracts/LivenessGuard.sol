@@ -40,7 +40,7 @@ contract LivenessGuard {
     error RecoveryDelayNotPassed();
     error ExecutionFailed();
 
-    bytes32 constant ACTIVATE_TYPEHASH = keccak256("Activate(address account,uint256 chainId,uint256 expiry)");
+    bytes32 constant ACTIVATE_TYPEHASH = keccak256("Activate(address account,uint256 expiry)");
 
     constructor(address _guardian, uint256 _recoveryDelay) {
         guardian = _guardian;
@@ -57,16 +57,17 @@ contract LivenessGuard {
     }
 
     /// @notice Activate the guard with user signature (can be relayed by anyone)
-    /// @dev Protects against 0-chainID 7702 attack - activation must happen within expiry
+    /// @dev Protects against 0-chainID 7702 attack - activation must happen within expiry.
+    ///      No chainId in signature so one signature works on all chains.
     /// @param expiry Timestamp after which activation is no longer valid
-    /// @param sig User signature of keccak256(ACTIVATE_TYPEHASH, account, chainId, expiry)
+    /// @param sig User signature of keccak256(ACTIVATE_TYPEHASH, account, expiry)
     function activate(uint256 expiry, bytes calldata sig) external {
         if (activatedAt != 0) revert AlreadyActivated();
         if (block.timestamp > expiry) revert ActivationExpired();
 
         bytes32 hash = keccak256(abi.encodePacked(
             "\x19Ethereum Signed Message:\n32",
-            keccak256(abi.encode(ACTIVATE_TYPEHASH, address(this), block.chainid, expiry))
+            keccak256(abi.encode(ACTIVATE_TYPEHASH, address(this), expiry))
         ));
         if (_recover(hash, sig) != address(this)) revert InvalidSignature();
 

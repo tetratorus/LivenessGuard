@@ -29,11 +29,10 @@ describe("LivenessGuard", function () {
   }
 
   async function signActivation(user: HDNodeWallet, expiry: bigint): Promise<string> {
-    const ACTIVATE_TYPEHASH = ethers.keccak256(ethers.toUtf8Bytes("Activate(address account,uint256 chainId,uint256 expiry)"));
-    const chainId = (await ethers.provider.getNetwork()).chainId;
+    const ACTIVATE_TYPEHASH = ethers.keccak256(ethers.toUtf8Bytes("Activate(address account,uint256 expiry)"));
     const hash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-      ["bytes32", "address", "uint256", "uint256"],
-      [ACTIVATE_TYPEHASH, user.address, chainId, expiry]
+      ["bytes32", "address", "uint256"],
+      [ACTIVATE_TYPEHASH, user.address, expiry]
     ));
     return user.signMessage(ethers.getBytes(hash));
   }
