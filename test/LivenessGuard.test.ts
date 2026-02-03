@@ -360,6 +360,83 @@ describe("LivenessGuard", function () {
     });
   });
 
+  describe("passthrough", () => {
+    it("user can set implementation", async () => {
+      const user = await createUser();
+      const delegated = await setupDelegation(user);
+
+      const MockSCA = await ethers.getContractFactory("MockSCA");
+      const mockSCA = await MockSCA.deploy();
+
+      await expect(delegated.connect(user).setImplementation(await mockSCA.getAddress()))
+        .to.emit(delegated, "ImplementationSet")
+        .withArgs(await mockSCA.getAddress());
+
+      expect(await delegated.implementation()).to.equal(await mockSCA.getAddress());
+    });
+
+    it("non-user cannot set implementation", async () => {
+      const user = await createUser();
+      const delegated = await setupDelegation(user);
+
+      const MockSCA = await ethers.getContractFactory("MockSCA");
+      const mockSCA = await MockSCA.deploy();
+
+      await expect(delegated.connect(other).setImplementation(await mockSCA.getAddress()))
+        .to.be.revertedWithCustomError(delegated, "NotSelf");
+    });
+
+    it("fallback delegates to implementation", async () => {
+      const user = await createUser();
+      const delegated = await setupDelegation(user);
+
+      const MockSCA = await ethers.getContractFactory("MockSCA");
+      const mockSCA = await MockSCA.deploy();
+
+      // User sets implementation
+      await delegated.connect(user).setImplementation(await mockSCA.getAddress());
+
+      // Call SCA function through the delegated contract
+      const scaInterface = MockSCA.interface;
+      const calldata = scaInterface.encodeFunctionData("setSCAValue", [42n]);
+
+      // Anyone can call the passthrough
+      await deployer.sendTransaction({ to: user.address, data: calldata });
+
+      // Value is stored in user's EOA storage (via delegatecall)
+      const getCalldata = scaInterface.encodeFunctionData("getSCAValue");
+      const result = await ethers.provider.call({ to: user.address, data: getCalldata });
+      const decoded = scaInterface.decodeFunctionResult("getSCAValue", result);
+      expect(decoded[0]).to.equal(42n);
+    });
+
+    it("fallback does nothing if no implementation set", async () => {
+      const user = await createUser();
+      const delegated = await setupDelegation(user);
+
+      // No implementation set, call should just return
+      const MockSCA = await ethers.getContractFactory("MockSCA");
+      const calldata = MockSCA.interface.encodeFunctionData("setSCAValue", [42n]);
+
+      // Should not revert
+      await deployer.sendTransaction({ to: user.address, data: calldata });
+    });
+
+    it("LivenessGuard functions take precedence over passthrough", async () => {
+      const user = await createUser();
+      const delegated = await setupDelegation(user);
+      await activateGuard(delegated, user);
+
+      const MockSCA = await ethers.getContractFactory("MockSCA");
+      const mockSCA = await MockSCA.deploy();
+      await delegated.connect(user).setImplementation(await mockSCA.getAddress());
+
+      // initiateRecovery should still work (not passthrough)
+      await expect(delegated.connect(guardian).initiateRecovery())
+        .to.emit(delegated, "RecoveryInitiated");
+    });
+  });
+
   describe("receive", () => {
     it("accepts ETH transfers", async () => {
       const user = await createUser();
