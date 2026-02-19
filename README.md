@@ -5,16 +5,15 @@ Minimal EIP-7702 dead-man switch for EOA recovery.
 ## How It Works
 
 1. User delegates their EOA to LivenessGuard via EIP-7702
-2. User signs activation message with expiry (relayable by anyone)
-3. Guardian (fixed at deployment) can initiate recovery
-4. Long delay period (e.g., 30 days)
-5. User can veto anytime by calling `cancelRecovery()` - proves key possession
-6. After delay, guardian can `execute()` to move assets
-7. Guardian can add operators to delegate execution rights
+2. Guardian (fixed at deployment) can initiate recovery
+3. Long delay period (e.g., 90 days) where user can veto by calling `cancelRecovery()`
+4. After delay, a 7-day recovery window opens
+5. Guardian can `execute()` to move assets or `addOperator()` to delegate execution rights
+6. If the window expires without action, guardian can re-initiate recovery
 
 ## SCW Passthrough
 
-LivenessGuard supports passthrough to an underlying Smart Contract Account (Safe, ERC-4337, etc.):
+LivenessGuard supports passthrough to an underlying Smart Contract Wallet (Safe, ERC-4337, etc.):
 
 ```
 EOA → EIP-7702 → LivenessGuard → Safe/ERC-4337
@@ -32,18 +31,19 @@ EOA → EIP-7702 → LivenessGuard → Safe/ERC-4337
 address immutable guardian;
 uint256 immutable recoveryDelay;
 
+// Constants
+uint256 constant RECOVERY_WINDOW = 7 days;
+
 // Storage per EOA
-uint256 activatedAt;          // 0 = inert, >0 = active
 uint256 recoveryInitiatedAt;  // 0 = normal, >0 = recovery pending
 address implementation;       // Underlying SCW for passthrough
 mapping(address => bool) isOperator;
 
 // Functions
-activate(expiry, sig)         // Anyone can relay user's signed activation
 cancelRecovery()              // User only (msg.sender == address(this))
-initiateRecovery()            // Guardian only, requires activated
-execute(to, value, data)      // Guardian or operator, after delay
-addOperator(operator)         // Guardian only, after delay
+initiateRecovery()            // Guardian only, can re-initiate after window expires
+execute(to, value, data)      // Guardian or operator, after delay, within window
+addOperator(operator)         // Guardian only, after delay, within window
 removeOperator(operator)      // Guardian only
 setImplementation(impl)       // User only, sets SCW passthrough
 ```
@@ -67,8 +67,8 @@ npm run deploy:factory -- --network localhost
 # Deploy LivenessGuard
 GUARDIAN_ADDRESS=0x... npm run deploy -- --network <network>
 
-# Optional: custom delay (default 30 days) and salt
-GUARDIAN_ADDRESS=0x... RECOVERY_DELAY=604800 SALT=0x02 npm run deploy -- --network <network>
+# Optional: custom delay (default 90 days) and salt
+GUARDIAN_ADDRESS=0x... RECOVERY_DELAY=7776000 SALT=0x02 npm run deploy -- --network <network>
 ```
 
 Same guardian + delay + salt = same address everywhere.

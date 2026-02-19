@@ -7,7 +7,8 @@ import { time } from "@nomicfoundation/hardhat-network-helpers";
 describe("LivenessGuard", function () {
   let guard: LivenessGuard;
   let deployer: any, guardian: any, other: any;
-  const RECOVERY_DELAY = 30 * 24 * 60 * 60; // 30 days
+  const RECOVERY_DELAY = 90 * 24 * 60 * 60; // 90 days
+  const RECOVERY_WINDOW = 7 * 24 * 60 * 60; // 7 days
 
   beforeEach(async () => {
     [deployer, guardian, other] = await ethers.getSigners();
@@ -28,91 +29,10 @@ describe("LivenessGuard", function () {
     return ethers.getContractAt("LivenessGuard", user.address);
   }
 
-  async function signActivation(user: HDNodeWallet, expiry: bigint): Promise<string> {
-    const ACTIVATE_TYPEHASH = ethers.keccak256(ethers.toUtf8Bytes("Activate(address account,uint256 expiry)"));
-    const hash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
-      ["bytes32", "address", "uint256"],
-      [ACTIVATE_TYPEHASH, user.address, expiry]
-    ));
-    return user.signMessage(ethers.getBytes(hash));
-  }
-
-  async function activateGuard(delegated: LivenessGuard, user: HDNodeWallet): Promise<void> {
-    const expiry = BigInt(await time.latest()) + 3600n; // 1 hour from now
-    const sig = await signActivation(user, expiry);
-    await delegated.activate(expiry, sig);
-  }
-
-  describe("activate", () => {
-    it("can activate with valid signature", async () => {
-      const user = await createUser();
-      const delegated = await setupDelegation(user);
-
-      const expiry = BigInt(await time.latest()) + 3600n;
-      const sig = await signActivation(user, expiry);
-
-      await expect(delegated.activate(expiry, sig))
-        .to.emit(delegated, "Activated");
-
-      expect(await delegated.activatedAt()).to.be.gt(0);
-    });
-
-    it("cannot activate after expiry", async () => {
-      const user = await createUser();
-      const delegated = await setupDelegation(user);
-
-      const expiry = BigInt(await time.latest()) + 3600n;
-      const sig = await signActivation(user, expiry);
-
-      await time.increase(3601); // Past expiry
-
-      await expect(delegated.activate(expiry, sig))
-        .to.be.revertedWithCustomError(delegated, "ActivationExpired");
-    });
-
-    it("cannot activate twice", async () => {
-      const user = await createUser();
-      const delegated = await setupDelegation(user);
-
-      await activateGuard(delegated, user);
-
-      const expiry = BigInt(await time.latest()) + 3600n;
-      const sig = await signActivation(user, expiry);
-
-      await expect(delegated.activate(expiry, sig))
-        .to.be.revertedWithCustomError(delegated, "AlreadyActivated");
-    });
-
-    it("wrong signer cannot activate", async () => {
-      const user = await createUser();
-      const delegated = await setupDelegation(user);
-
-      const wrongUser = await createUser();
-      const expiry = BigInt(await time.latest()) + 3600n;
-      const sig = await signActivation(wrongUser, expiry); // Wrong signer
-
-      await expect(delegated.activate(expiry, sig))
-        .to.be.revertedWithCustomError(delegated, "InvalidSignature");
-    });
-
-    it("anyone can relay activation", async () => {
-      const user = await createUser();
-      const delegated = await setupDelegation(user);
-
-      const expiry = BigInt(await time.latest()) + 3600n;
-      const sig = await signActivation(user, expiry);
-
-      // Other account relays the activation
-      await expect(delegated.connect(other).activate(expiry, sig))
-        .to.emit(delegated, "Activated");
-    });
-  });
-
   describe("initiateRecovery", () => {
-    it("guardian can initiate recovery after activation", async () => {
+    it("guardian can initiate recovery", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await expect(delegated.connect(guardian).initiateRecovery())
         .to.emit(delegated, "RecoveryInitiated");
@@ -120,18 +40,9 @@ describe("LivenessGuard", function () {
       expect(await delegated.recoveryInitiatedAt()).to.be.gt(0);
     });
 
-    it("cannot initiate recovery before activation", async () => {
-      const user = await createUser();
-      const delegated = await setupDelegation(user);
-
-      await expect(delegated.connect(guardian).initiateRecovery())
-        .to.be.revertedWithCustomError(delegated, "NotActivated");
-    });
-
     it("non-guardian cannot initiate recovery", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await expect(delegated.connect(other).initiateRecovery())
         .to.be.revertedWithCustomError(delegated, "NotGuardian");
@@ -140,12 +51,25 @@ describe("LivenessGuard", function () {
     it("cannot initiate recovery twice", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await delegated.connect(guardian).initiateRecovery();
 
       await expect(delegated.connect(guardian).initiateRecovery())
         .to.be.revertedWithCustomError(delegated, "RecoveryAlreadyInitiated");
+    });
+
+    it("can re-initiate recovery after window expires", async () => {
+      const user = await createUser();
+      const delegated = await setupDelegation(user);
+
+      await delegated.connect(guardian).initiateRecovery();
+
+      // Window expires
+      await time.increase(RECOVERY_DELAY + RECOVERY_WINDOW + 1);
+
+      // Can re-initiate
+      await expect(delegated.connect(guardian).initiateRecovery())
+        .to.emit(delegated, "RecoveryInitiated");
     });
   });
 
@@ -153,7 +77,6 @@ describe("LivenessGuard", function () {
     it("user can cancel recovery (msg.sender == address(this))", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await delegated.connect(guardian).initiateRecovery();
       expect(await delegated.recoveryInitiatedAt()).to.be.gt(0);
@@ -167,7 +90,6 @@ describe("LivenessGuard", function () {
     it("non-user cannot cancel recovery", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await delegated.connect(guardian).initiateRecovery();
 
@@ -181,7 +103,6 @@ describe("LivenessGuard", function () {
     it("cannot cancel if no recovery initiated", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await expect(delegated.connect(user).cancelRecovery())
         .to.be.revertedWithCustomError(delegated, "RecoveryNotInitiated");
@@ -192,7 +113,6 @@ describe("LivenessGuard", function () {
     it("execute fails before delay", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await delegated.connect(guardian).initiateRecovery();
 
@@ -204,10 +124,9 @@ describe("LivenessGuard", function () {
         .to.be.revertedWithCustomError(delegated, "RecoveryDelayNotPassed");
     });
 
-    it("execute works after delay", async () => {
+    it("execute works after delay within recovery window", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await delegated.connect(guardian).initiateRecovery();
       await time.increase(RECOVERY_DELAY + 1);
@@ -222,10 +141,20 @@ describe("LivenessGuard", function () {
       expect(await ethers.provider.getBalance(recipient)).to.equal(amount);
     });
 
+    it("execute fails after recovery window expires", async () => {
+      const user = await createUser();
+      const delegated = await setupDelegation(user);
+
+      await delegated.connect(guardian).initiateRecovery();
+      await time.increase(RECOVERY_DELAY + RECOVERY_WINDOW + 1);
+
+      await expect(delegated.connect(guardian).execute(other.address, 0, "0x"))
+        .to.be.revertedWithCustomError(delegated, "RecoveryWindowExpired");
+    });
+
     it("execute fails if not in recovery", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await expect(delegated.connect(guardian).execute(other.address, 0, "0x"))
         .to.be.revertedWithCustomError(delegated, "RecoveryNotInitiated");
@@ -234,7 +163,6 @@ describe("LivenessGuard", function () {
     it("execute fails if not guardian or operator", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await delegated.connect(guardian).initiateRecovery();
       await time.increase(RECOVERY_DELAY + 1);
@@ -246,7 +174,6 @@ describe("LivenessGuard", function () {
     it("can transfer ERC20 tokens", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       const MockERC20 = await ethers.getContractFactory("MockERC20");
       const token = await MockERC20.deploy();
@@ -265,7 +192,6 @@ describe("LivenessGuard", function () {
     it("can transfer ERC721 tokens", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       const MockERC721 = await ethers.getContractFactory("MockERC721");
       const nft = await MockERC721.deploy();
@@ -285,7 +211,6 @@ describe("LivenessGuard", function () {
     it("guardian can add operator after recovery delay", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await delegated.connect(guardian).initiateRecovery();
       await time.increase(RECOVERY_DELAY + 1);
@@ -300,7 +225,6 @@ describe("LivenessGuard", function () {
     it("guardian cannot add operator before recovery delay", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await delegated.connect(guardian).initiateRecovery();
 
@@ -308,10 +232,20 @@ describe("LivenessGuard", function () {
         .to.be.revertedWithCustomError(delegated, "RecoveryDelayNotPassed");
     });
 
+    it("guardian cannot add operator after recovery window expires", async () => {
+      const user = await createUser();
+      const delegated = await setupDelegation(user);
+
+      await delegated.connect(guardian).initiateRecovery();
+      await time.increase(RECOVERY_DELAY + RECOVERY_WINDOW + 1);
+
+      await expect(delegated.connect(guardian).addOperator(other.address))
+        .to.be.revertedWithCustomError(delegated, "RecoveryWindowExpired");
+    });
+
     it("non-guardian cannot add operator", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await delegated.connect(guardian).initiateRecovery();
       await time.increase(RECOVERY_DELAY + 1);
@@ -323,7 +257,6 @@ describe("LivenessGuard", function () {
     it("operator can call execute after being added", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await delegated.connect(guardian).initiateRecovery();
       await time.increase(RECOVERY_DELAY + 1);
@@ -340,7 +273,6 @@ describe("LivenessGuard", function () {
     it("guardian can remove operator", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       await delegated.connect(guardian).initiateRecovery();
       await time.increase(RECOVERY_DELAY + 1);
@@ -424,7 +356,6 @@ describe("LivenessGuard", function () {
     it("LivenessGuard functions take precedence over passthrough", async () => {
       const user = await createUser();
       const delegated = await setupDelegation(user);
-      await activateGuard(delegated, user);
 
       const MockSCW = await ethers.getContractFactory("MockSCW");
       const mockSCW = await MockSCW.deploy();
